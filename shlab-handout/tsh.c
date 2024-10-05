@@ -169,24 +169,28 @@ void eval(char *cmdline)
   char *argv[MAXARGS];    /* Argument list execve() */
   // int bg;                 /* should the job run in bg or fg? */
   pid_t pid;
-  
   int bg = parseline(cmdline, argv);
+  int status;
   
   if (argv[0] == NULL)
     return;
   
   if (!builtin_cmd(argv)) {
-    if ((pid = Fork()) == 0) {
-      if (execve(argv[0], argv, environ) < 0) {
+    if ((pid = Fork()) == 0) {                    /* Child runs user job */
+      
+      if (execve(argv[0], argv, environ) < 0)     /* If program is not exixt direct exit */
 	exit(0);
-      }
     }
   }
 
+  /* Parents waits for forground job to terminate  */
   if (!bg) {
-    int status;
+    //int status;
+    addjob(jobs, pid, FG, cmdline);
     if (waitpid(pid, &status, 0) < 0)
-      return;
+      unix_error("watfg: waitpid error");
+  } else {
+    addjob(jobs, pid, BG, cmdline);
   }
   return;
 }
