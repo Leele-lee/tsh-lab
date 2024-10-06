@@ -49,7 +49,6 @@ struct job_t {              /* The job struct */
     char cmdline[MAXLINE];  /* command line */
 };
 struct job_t jobs[MAXJOBS]; /* The job list */
-int bg_count;
 /* End global variables */
 
 
@@ -192,7 +191,6 @@ void eval(char *cmdline)
       unix_error("watfg: waitpid error");
   } else {
     addjob(jobs, pid, BG, cmdline);
-    printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
   return;
 }
