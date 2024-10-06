@@ -192,6 +192,7 @@ void eval(char *cmdline)
       unix_error("watfg: waitpid error");
   } else {
     addjob(jobs, pid, BG, cmdline);
+    //printf("[%d] (%d) %s", bg_count, pid, cmdline);
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
   return;
@@ -262,8 +263,29 @@ int builtin_cmd(char **argv)
 {
   if (!strcmp(argv[0], "quit"))
     exit(0);
-  if (!strcmp(argv[0], "job"))
-    return 0;
+
+  /* The job commands lists all backaround jobs
+   * tsh> jobs
+   * [1] (623879) Running ./myspin 2 &
+   * [2] (623881) Running ./myspin 3 &
+   */
+  if (!strcmp(argv[0], "job")) {
+    for (int i = 0; i < bg_count + 1; i++) {   /* all background plus one foreground */
+      int job_state = jobs[i].state;
+      int job_jid = jobs[i].jid;
+      int job_pid = jobs[i].pid;
+      char* state_str;
+      char* cmd = jobs[i].cmdline;
+      if (job_state == BG) {
+	state_str = "Running";
+        printf("[%d] (%d) %s %s", job_jid, job_pid, state_str, cmd);
+      } else if (job_state == ST) {
+	state_str = "Stopped";
+	printf("[%d] (%d) %s %s", job_jid, job_pid, state_str, cmd);
+      }
+    }
+    return 1;
+  }
   return 0;     /* not a builtin command */
 }
 
