@@ -269,8 +269,8 @@ int builtin_cmd(char **argv)
    * [1] (623879) Running ./myspin 2 &
    * [2] (623881) Running ./myspin 3 &
    */
-  if (!strcmp(argv[0], "job")) {
-    for (int i = 0; i < bg_count + 1; i++) {   /* all background plus one foreground */
+  if (!strcmp(argv[0], "jobs")) {
+    for (int i = 0; i < MAXJOBS; i++) {
       int job_state = jobs[i].state;
       int job_jid = jobs[i].jid;
       int job_pid = jobs[i].pid;
