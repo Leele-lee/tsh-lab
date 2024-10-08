@@ -91,6 +91,8 @@ pid_t Fork(void);
 pid_t Waitpid(pid_t pid, int *iptr, int options);
 void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 void Sigfillset(sigset_t *set);
+void Sigemptyset(sigset_t *set);
+void Sigaddset(sigset_t *set, int signum);
   
 /*
  * main - The shell's main routine 
@@ -177,32 +179,33 @@ void eval(char *cmdline)
   pid_t pid;
   int bg = parseline(cmdline, argv);
   int status;
-  sigset_t mask_all, pre_all;
+  sigset_t mask_all, mask_one, prev_one;
   
   if (argv[0] == NULL)
     return;
+
+  Sigfillset(&mask_all);
+  Sigemptyset(&mask_one);
+  Sigaddset(&mask_one, SIGCHLD);
   
-  if (!builtin_cmd(argv)) {
+  Sigprocmask(SIG_BLOCK, &mask_one, &prev_one);   /* Block SIGCHLD*/
+  if (!builtin_cmd(argv)) {                       
     if ((pid = Fork()) == 0) {                    /* Child runs user job */
-      
+      Sigprocmask(SIG_SETMASK, &prev_one, NULL);  /* Unblock SIGCHLD in child process */
       if (execve(argv[0], argv, environ) < 0)     /* If program is not exixt direct exit */
 	exit(0);
     }
   }
 
-  Sigfillset(&mask_all);
-
   /* Parents waits for forground job to terminate  */
   if (!bg) {
-    //int status;
+    Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, FG, cmdline);
-    if (waitpid(pid, &status, 0) < 0)
-      unix_error("watfg: waitpid error");
+    Sigprocmask(SIG_SETMASK, &prev_one, NULL);    /* Unblock SIGCHLD */
   } else {
-    Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);
+    Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, BG, cmdline);
-    Sigprocmask(SIG_SETMASK, &pre_all, NULL);
-    //printf("[%d] (%d) %s", bg_count, pid, cmdline);
+    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* unblock SIGCHLD */
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
   return;
@@ -339,7 +342,7 @@ void sigchld_handler(int sig)
       int signal_number;
       printf("Job [%s] (%s) terminated by siganl %d", current_job.jid, currentjob.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
       /* delete job must happened after addjob */
-      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);
+      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);                                                     /* Atomic operations */
       deletejob(jobs, pid);
       Sigprocmask(SIG_SETMASK, &pre_all, NULL);
     }
@@ -620,5 +623,19 @@ void Sigfillset(sigset_t *set)
 { 
     if (sigfillset(set) < 0)
 	unix_error("Sigfillset error");
+    return;
+}
+
+void Sigemptyset(sigset_t *set)
+{
+    if (sigemptyset(set) < 0)
+	unix_error("Sigemptyset error");
+    return;
+}
+
+void Sigaddset(sigset_t *set, int signum)
+{
+    if (sigaddset(set, signum) < 0)
+	unix_error("Sigaddset error");
     return;
 }
