@@ -87,6 +87,7 @@ typedef void handler_t(int);
 handler_t *Signal(int signum, handler_t *handler);
 
 pid_t Fork(void);
+pid_t Waitpid(pid_t pid, int *iptr, int options);
 /*
  * main - The shell's main routine 
  */
@@ -318,7 +319,21 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    return;
+  int status;
+  pid_t pid;
+  
+  while ((pid == Waitpid(-1, &status, WNOHANG)) > 0) {
+    job_t current_job = getjobpid(jobs, pid);
+    if (WIFSIGNALED(status)) {
+      int signal_number;
+      printf("Job [%s] (%s) terminated by siganl %d", current_job.jid, currentjob.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
+      /* delete job must happened after addjob */
+      
+      deletejob(jobs, pid);
+    }
+  }
+
+  return;
 }
 
 /* 
@@ -328,7 +343,9 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-    return;
+  pid_t fg_jid = fgpid(jobs);
+  if (fg_jid != 0)
+    kill(-fg_jid, SIGINT);
 }
 
 /*
@@ -413,7 +430,7 @@ int deletejob(struct job_t *jobs, pid_t pid)
     for (i = 0; i < MAXJOBS; i++) {
 	if (jobs[i].pid == pid) {
 	    clearjob(&jobs[i]);
-	    nextjid = maxjid(jobs)+1;
+	    nextjid= maxjid(jobs)+1;
 	    return 1;
 	}
     }
@@ -567,4 +584,14 @@ pid_t Fork(void) {
     if ((pid = fork()) < 0)
         unix_error("Fork error");
     return pid;
+}
+
+
+pid_t Waitpid(pid_t pid, int *iptr, int options) 
+{
+    pid_t retpid;
+
+    if ((retpid  = waitpid(pid, iptr, options)) < 0) 
+	unix_error("Waitpid error");
+    return(retpid);
 }
