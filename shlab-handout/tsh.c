@@ -84,10 +84,14 @@ void usage(void);
 void unix_error(char *msg);
 void app_error(char *msg);
 typedef void handler_t(int);
-handler_t *Signal(int signum, handler_t *handler);
 
+/* Here are wrap functions of system calls */
+handler_t *Signal(int signum, handler_t *handler);
 pid_t Fork(void);
 pid_t Waitpid(pid_t pid, int *iptr, int options);
+void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+void Sigfillset(sigset_t *set);
+  
 /*
  * main - The shell's main routine 
  */
@@ -173,6 +177,7 @@ void eval(char *cmdline)
   pid_t pid;
   int bg = parseline(cmdline, argv);
   int status;
+  sigset_t mask_all, pre_all;
   
   if (argv[0] == NULL)
     return;
@@ -185,6 +190,8 @@ void eval(char *cmdline)
     }
   }
 
+  Sigfillset(&mask_all);
+
   /* Parents waits for forground job to terminate  */
   if (!bg) {
     //int status;
@@ -192,7 +199,9 @@ void eval(char *cmdline)
     if (waitpid(pid, &status, 0) < 0)
       unix_error("watfg: waitpid error");
   } else {
+    Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);
     addjob(jobs, pid, BG, cmdline);
+    Sigprocmask(SIG_SETMASK, &pre_all, NULL);
     //printf("[%d] (%d) %s", bg_count, pid, cmdline);
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
@@ -321,15 +330,18 @@ void sigchld_handler(int sig)
 {
   int status;
   pid_t pid;
-  
+  sigset_t mask_all, pre_all;
+
+  Sigfillset(&mask_all);
   while ((pid == Waitpid(-1, &status, WNOHANG)) > 0) {
     job_t current_job = getjobpid(jobs, pid);
     if (WIFSIGNALED(status)) {
       int signal_number;
       printf("Job [%s] (%s) terminated by siganl %d", current_job.jid, currentjob.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
       /* delete job must happened after addjob */
-      
+      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);
       deletejob(jobs, pid);
+      Sigprocmask(SIG_SETMASK, &pre_all, NULL);
     }
   }
 
@@ -594,4 +606,19 @@ pid_t Waitpid(pid_t pid, int *iptr, int options)
     if ((retpid  = waitpid(pid, iptr, options)) < 0) 
 	unix_error("Waitpid error");
     return(retpid);
+}
+
+void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
+{
+    if (sigprocmask(how, set, oldset) < 0)
+	unix_error("Sigprocmask error");
+    return;
+}
+
+
+void Sigfillset(sigset_t *set)
+{ 
+    if (sigfillset(set) < 0)
+	unix_error("Sigfillset error");
+    return;
 }
