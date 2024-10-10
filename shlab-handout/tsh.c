@@ -173,26 +173,26 @@ int main(int argc, char **argv)
  * background children don't receive SIGINT (SIGTSTP) from the kernel
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
-void eval(char *cmdline) 
+void eval1(char *cmdline) 
 {
   char *argv[MAXARGS];    /* Argument list execve() */
   // int bg;                 /* should the job run in bg or fg? */
   pid_t pid;
   int bg = parseline(cmdline, argv);
   int status;
-  sigset_t mask_all, mask_one, prev_one;
+  sigset_t mask_all, mask_one, prev_one, prev_all;
   
   if (argv[0] == NULL)
     return;
 
   Sigfillset(&mask_all);
-  Sigemptyset(&mask_one);
+  //Sigemptyset(&mask_one);
   Sigaddset(&mask_one, SIGCHLD);
   
-  Sigprocmask(SIG_BLOCK, &mask_one, &prev_one);   /* Block SIGCHLD*/
+  Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);   /* Block SIGCHLD*/
   if (!builtin_cmd(argv)) {
     if ((pid = Fork()) == 0) {                    /* Child runs user job */
-      Sigprocmask(SIG_SETMASK, &prev_one, NULL);  /* Unblock SIGCHLD in child process */
+      Sigprocmask(SIG_SETMASK, &prev_all, NULL);  /* Unblock SIGCHLD in child process */
       if (execve(argv[0], argv, environ) < 0){     /* If program is not exixt direct exit */
 	printf("%s: Command not found.\n", argv[0]);
 	exit(0);
@@ -202,22 +202,24 @@ void eval(char *cmdline)
   /* Parents waits for forground job to terminate  */
   if (!bg) {                                      /* This is for foreground */
     pid = getpid();
-    Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
+    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, FG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_one, NULL);    /* Unblock SIGCHLD */
+    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* Unblock SIGCHLD */
     while (pid == fgpid(jobs)) {                  /* process's state is changed all time */
       sigsuspend(&prev_one);
     }
     //Waitpid(pid, &status, 0);                     /* Parent wait for foreground job to terminate */
   } else {                                        /* This is for background */
             
-    Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
+    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, BG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_one, NULL);    /* unblock SIGCHLD */
+    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* unblock SIGCHLD */
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
   return;
 }
+
+
 
 /* 
  * parseline - Parse the command line and build the argv array.
@@ -337,7 +339,7 @@ void waitfg(pid_t pid)
  *     available zombie children, but doesn't wait for any other
  *     currently running children to terminate.  
  */
-void sigchld_handler(int sig) 
+void sigchld_handler1(int sig) 
 {
   int olderrno = errno;
   int status;
@@ -370,6 +372,9 @@ void sigchld_handler(int sig)
   return;
 }
 
+void sigchld_handler(int sig) {
+  return;
+}
 /* 
  * sigint_handler - The kernel sends a SIGINT to the shell whenver the
  *    user types ctrl-c at the keyboard.  Catch it and send it along
