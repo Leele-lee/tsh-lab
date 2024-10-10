@@ -93,6 +93,7 @@ void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 void Sigfillset(sigset_t *set);
 void Sigemptyset(sigset_t *set);
 void Sigaddset(sigset_t *set, int signum);
+void Execve(const char *filename, char *const argv[], char *const envp[]);
   
 /*
  * main - The shell's main routine 
@@ -189,23 +190,30 @@ void eval(char *cmdline)
   Sigaddset(&mask_one, SIGCHLD);
   
   Sigprocmask(SIG_BLOCK, &mask_one, &prev_one);   /* Block SIGCHLD*/
-  if (!builtin_cmd(argv)) {                       
+  if (!builtin_cmd(argv)) {
     if ((pid = Fork()) == 0) {                    /* Child runs user job */
       Sigprocmask(SIG_SETMASK, &prev_one, NULL);  /* Unblock SIGCHLD in child process */
-      if (execve(argv[0], argv, environ) < 0)     /* If program is not exixt direct exit */
+      if (execve(argv[0], argv, environ) < 0){     /* If program is not exixt direct exit */
+	printf("%s: Command not found.\n", argv[0]);
 	exit(0);
+      }
     }
   }
-
   /* Parents waits for forground job to terminate  */
-  if (!bg) {
+  if (!bg) {                                      /* This is for foreground */
+    pid = getpid();
     Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, FG, cmdline);
     Sigprocmask(SIG_SETMASK, &prev_one, NULL);    /* Unblock SIGCHLD */
-  } else {
+    while (pid == fgpid(jobs)) {                  /* process's state is changed all time */
+      sigsuspend(&prev_one);
+    }
+    //Waitpid(pid, &status, 0);                     /* Parent wait for foreground job to terminate */
+  } else {                                        /* This is for background */
+            
     Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
     addjob(jobs, pid, BG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* unblock SIGCHLD */
+    Sigprocmask(SIG_SETMASK, &prev_one, NULL);    /* unblock SIGCHLD */
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
   return;
@@ -331,23 +339,34 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+  int olderrno = errno;
   int status;
   pid_t pid;
   sigset_t mask_all, pre_all;
 
   Sigfillset(&mask_all);
-  while ((pid == Waitpid(-1, &status, WNOHANG)) > 0) {
-    job_t current_job = getjobpid(jobs, pid);
+  while ((pid = Waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
+    
+    struct job_t current_job;
+    current_job = *getjobpid(jobs, pid);
     if (WIFSIGNALED(status)) {
-      int signal_number;
-      printf("Job [%s] (%s) terminated by siganl %d", current_job.jid, currentjob.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
+      int signal_number = WTERMSIG(status);
+      printf("Job [%d] (%d) terminated by siganl %d", current_job.jid, current_job.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
       /* delete job must happened after addjob */
       Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);                                                     /* Atomic operations */
       deletejob(jobs, pid);
       Sigprocmask(SIG_SETMASK, &pre_all, NULL);
     }
+    if (WIFEXITED(status)) {                                                                           /* normal exited */
+      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);                                                     /* Atomic operations */
+      deletejob(jobs, pid);
+      Sigprocmask(SIG_SETMASK, &pre_all, NULL);
+      printf("normal exit");
+    }
   }
-
+  if (errno != ECHILD)
+    unix_error("waitpid error");
+  errno = olderrno;
   return;
 }
 
@@ -358,9 +377,11 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+  int olderrno = errno;
   pid_t fg_jid = fgpid(jobs);
   if (fg_jid != 0)
     kill(-fg_jid, SIGINT);
+  errno = olderrno;
 }
 
 /*
@@ -606,7 +627,7 @@ pid_t Waitpid(pid_t pid, int *iptr, int options)
 {
     pid_t retpid;
 
-    if ((retpid  = waitpid(pid, iptr, options)) < 0) 
+    if ((retpid  = waitpid(pid, iptr, options)) < 0)
 	unix_error("Waitpid error");
     return(retpid);
 }
@@ -638,4 +659,11 @@ void Sigaddset(sigset_t *set, int signum)
     if (sigaddset(set, signum) < 0)
 	unix_error("Sigaddset error");
     return;
+}
+
+
+void Execve(const char *filename, char *const argv[], char *const envp[]) 
+{
+    if (execve(filename, argv, envp) < 0)
+	unix_error("Execve error");
 }
