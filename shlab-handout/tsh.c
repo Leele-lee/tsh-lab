@@ -173,15 +173,39 @@ int main(int argc, char **argv)
  * background children don't receive SIGINT (SIGTSTP) from the kernel
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
-void eval1(char *cmdline) 
+void eval(char *cmdline) {
+  char *argv[MAXARGS];;
+  int bg = parseline(cmdline, argv);
+  pid_t pid;
+  int status;
+
+  if (argv[0] == NULL)
+      return;
+
+  if (!builtin_cmd(argv)) {                           /* built-in command,should handle it immediately and wait for the next command */
+    if ((pid = Fork()) == 0) {
+      setpgid(0, 0);
+      if (execve(argv[0], argv, environ) < 0) {
+	printf("%s: command not found.\n", argv[0]);
+	exit(0);
+      }
+    }
+    addjob(jobs, pid, bg ? BG : FG, cmdline);
+    if (!bg) {
+      Waitpid(pid, &status, 0);
+    } else {
+      printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
+    }
+  }
+}
+
+void eval1(char *cmdline)
 {
   char *argv[MAXARGS];    /* Argument list execve() */
-  // int bg;                 /* should the job run in bg or fg? */
+  // int bg;                 /* should the job run in bg or fg? */                                                                                                                                       
   pid_t pid;
   int bg = parseline(cmdline, argv);
   int status;
-  sigset_t mask_all, mask_one, prev_one, prev_all;
-  
   if (argv[0] == NULL)
     return;
 
@@ -200,9 +224,8 @@ void eval1(char *cmdline)
     }
   }
   /* Parents waits for forground job to terminate  */
-  if (!bg) {                                      /* This is for foreground */
-    pid = getpid();
-    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
+    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* at
+  if (!bg) {                                                                                                                                              
     addjob(jobs, pid, FG, cmdline);
     Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* Unblock SIGCHLD */
     while (pid == fgpid(jobs)) {                  /* process's state is changed all time */
@@ -216,10 +239,7 @@ void eval1(char *cmdline)
     Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* unblock SIGCHLD */
     printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
-  return;
 }
-
-
 
 /* 
  * parseline - Parse the command line and build the argv array.
@@ -325,7 +345,10 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    return;
+  while (fgpid(jobs) == pid) {
+    sleep(1);
+  }
+  return;
 }
 
 /*****************
