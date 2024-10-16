@@ -178,19 +178,28 @@ void eval(char *cmdline) {
   int bg = parseline(cmdline, argv);
   pid_t pid;
   int status;
+  sigset_t mask_all, prev_all;
 
+  Sigfillset(&mask_all);
+  
   if (argv[0] == NULL)
       return;
 
   if (!builtin_cmd(argv)) {                           /* built-in command,should handle it immediately and wait for the next command */
+    Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);     /* Block all signal in case of child process run before parent process and change state before addjob */
+     
     if ((pid = Fork()) == 0) {
       setpgid(0, 0);
+      Sigprocmask(SIG_SETMASK, &prev_all, NULL);      /* Unblock all signal before executing child process */
+      
       if (execve(argv[0], argv, environ) < 0) {
 	printf("%s: command not found.\n", argv[0]);
 	exit(0);
       }
     }
     addjob(jobs, pid, bg ? BG : FG, cmdline);
+    Sigprocmask(SIG_SETMASK, &prev_all, NULL);        /* Unblock signal */
+    
     if (!bg) {
       Waitpid(pid, &status, 0);
     } else {
@@ -206,6 +215,8 @@ void eval1(char *cmdline)
   pid_t pid;
   int bg = parseline(cmdline, argv);
   int status;
+  sigset_t mask_one, mask_all, prev_all, prev_one;
+  
   if (argv[0] == NULL)
     return;
 
