@@ -297,6 +297,10 @@ int builtin_cmd(char **argv)
     }
     return 1;
   }
+  if (!strcmp(argv[0], "fg") || !strcmp(argv[0], "bg")) {
+    do_bgfg(argv);
+    return 1;
+  }
   return 0;     /* not a builtin command */
 }
 
@@ -305,7 +309,38 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+  pid_t jobid;
+  pid_t pid;
+  struct job_t *job_ptr;
+  
+  if (argv[1] == NULL) {
+    printf("%s command requires PID or %%jobid argument\n", argv[0]);
     return;
+  }
+  if ((argv[1][0] < '0' || argv[1][0] > '9') && (argv[1][0] != '%')) {        /* bg sdf, bg -563 is incorrect */
+    printf("%s: argument must be a PID or %%jobid", argv[0]);
+    return;
+  }
+  if (argv[1][0] == '%') {                                                    /* get jobid */
+    jobid = atoi(argv[1] + 1);
+    job_ptr = getjobjid(jobs, jobid);
+   
+  } else {
+    pid = atoi(argv[1]);
+    job_ptr = getjobpid(jobs, pid);
+    //Kill(pid, SIGCONT);
+  }
+  if (!job_ptr) {
+    printf("(%s): No such process\n", argv[1]);
+    return;
+  }
+  Kill(job_ptr->pid, SIGCONT);
+  job_ptr->state = (!strcmp(argv[0], "fg")) ? FG : BG;                         /* change state */
+  if (!strcmp(argv[0], "bg"))
+    printf("[%d] (%d) Running %s", job_ptr->jid, job_ptr->pid, job_ptr->cmdline);
+  else
+    waitfg(job_ptr->pid);                                                     /* if fg must wait for terminate or stopped */
+  return;
 }
 
 /* 
@@ -370,40 +405,6 @@ void sigchld_handler(int sig) {
     unix_error("waitpid error");
 
   errno = olderrno;
-}
-
-void sigchld_handler1(int sig) 
-{
-  int olderrno = errno;
-  int status;
-  pid_t pid;
-  sigset_t mask_all, pre_all;
-
-  Sigfillset(&mask_all);
-  printf("Entering sigchld_handler\n");
-  while ((pid = Waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
-    
-    struct job_t current_job;
-    current_job = *getjobpid(jobs, pid);
-    if (WIFSIGNALED(status)) {
-      int signal_number = WTERMSIG(status);
-      printf("Job [%d] (%d) terminated by siganl %d", current_job.jid, current_job.pid, signal_number); /* Job [1] (1007084) terminated by signal 2 */
-      /* delete job must happened after addjob */
-      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);                                                     /* Atomic operations */
-      deletejob(jobs, pid);
-      Sigprocmask(SIG_SETMASK, &pre_all, NULL);
-    }
-    if (WIFEXITED(status)) {                                                                           /* normal exited */
-      Sigprocmask(SIG_BLOCK, &mask_all, &pre_all);                                                     /* Atomic operations */
-      deletejob(jobs, pid);
-      Sigprocmask(SIG_SETMASK, &pre_all, NULL);
-      printf("normal exit");
-    }
-  }
-  if (errno != ECHILD)
-    unix_error("waitpid error");
-  errno = olderrno;
-  return;
 }
 
 /* 
