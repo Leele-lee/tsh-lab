@@ -94,6 +94,7 @@ void Sigfillset(sigset_t *set);
 void Sigemptyset(sigset_t *set);
 void Sigaddset(sigset_t *set, int signum);
 void Execve(const char *filename, char *const argv[], char *const envp[]);
+void Kill(pid_t pid, int signum);
   
 /*
  * main - The shell's main routine 
@@ -177,7 +178,6 @@ void eval(char *cmdline) {
   char *argv[MAXARGS];;
   int bg = parseline(cmdline, argv);
   pid_t pid;
-  int status;
   sigset_t mask_all, prev_all;
 
   Sigfillset(&mask_all);
@@ -201,54 +201,11 @@ void eval(char *cmdline) {
     Sigprocmask(SIG_SETMASK, &prev_all, NULL);        /* Unblock signal */
     
     if (!bg) {
-      Waitpid(pid, &status, 0);
+      //Waitpid(pid, &status, 0);                     /* Wrong, waitpid only wait for job terminate(after sigint_handler), not wait for reaped by sifchld_handler */
+      waitfg(pid);                                    /*  it waits for the foreground job to finish before continuing execution */
     } else {
       printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
     }
-  }
-}
-
-void eval1(char *cmdline)
-{
-  char *argv[MAXARGS];    /* Argument list execve() */
-  // int bg;                 /* should the job run in bg or fg? */                                                                                                                                       
-  pid_t pid;
-  int bg = parseline(cmdline, argv);
-  int status;
-  sigset_t mask_one, mask_all, prev_all, prev_one;
-  
-  if (argv[0] == NULL)
-    return;
-
-  Sigfillset(&mask_all);
-  //Sigemptyset(&mask_one);
-  Sigaddset(&mask_one, SIGCHLD);
-  
-  Sigprocmask(SIG_BLOCK, &mask_all, &prev_all);   /* Block SIGCHLD*/
-  if (!builtin_cmd(argv)) {
-    if ((pid = Fork()) == 0) {                    /* Child runs user job */
-      Sigprocmask(SIG_SETMASK, &prev_all, NULL);  /* Unblock SIGCHLD in child process */
-      if (execve(argv[0], argv, environ) < 0){     /* If program is not exixt direct exit */
-	printf("%s: Command not found.\n", argv[0]);
-	exit(0);
-      }
-    }
-  }
-  /* Parents waits for forground job to terminate  */
-    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* at
-  if (!bg) {                                                                                                                                              
-    addjob(jobs, pid, FG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* Unblock SIGCHLD */
-    while (pid == fgpid(jobs)) {                  /* process's state is changed all time */
-      sigsuspend(&prev_one);
-    }
-    //Waitpid(pid, &status, 0);                     /* Parent wait for foreground job to terminate */
-  } else {                                        /* This is for background */
-            
-    //Sigprocmask(SIG_BLOCK, &mask_all, NULL);      /* atomic operations */
-    addjob(jobs, pid, BG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_all, NULL);    /* unblock SIGCHLD */
-    printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
   }
 }
 
@@ -354,10 +311,11 @@ void do_bgfg(char **argv)
 /* 
  * waitfg - Block until process pid is no longer the foreground process
  */
-void waitfg(pid_t pid)
-{
-  while (fgpid(jobs) == pid) {
-    sleep(1);
+void waitfg(pid_t pid) {
+  sigset_t mask;
+  sigemptyset(&mask);
+  while (pid == fgpid(jobs)) {
+    sigsuspend(&mask);                /* atomic operation p781, and unblock signals */
   }
   return;
 }
@@ -373,6 +331,47 @@ void waitfg(pid_t pid)
  *     available zombie children, but doesn't wait for any other
  *     currently running children to terminate.  
  */
+void sigchld_handler(int sig) {
+  int olderrno = errno;
+  int status;
+  pid_t pid;
+  struct job_t* job;
+  sigset_t mask_all, mask_prev;
+
+  Sigfillset(&mask_all);
+  //printf("Entering sigchld_handler\n");
+  while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
+    job = getjobpid(jobs, pid);
+    if (WIFEXITED(status)) {                                                                 /* Child process normally exited */
+      Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
+      deletejob(jobs, pid);
+      Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
+    }
+    if (WIFSIGNALED(status)) {                                                               /* Child process because of siganl */
+      printf("Job [%d] (%d) terminated by siganl %d\n", job->jid, job->pid, WTERMSIG(status));
+      Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
+      deletejob(jobs, pid);
+      Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
+    }
+    if (WIFSTOPPED(status)) {
+      printf("Job [%d] (%d) stopped by siganl %d\n", job->jid, job->pid, WSTOPSIG(status));
+      Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
+      job->state = ST;                                                                       /* Need using atomitic operations protect global variables */
+      Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
+    }
+    if (WIFCONTINUED(status) && (job->state == ST)) {                                       /* may can be delete? */
+      Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
+      job->state = BG;
+      Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
+    }
+  }
+
+  if (pid < 0 && errno != ECHILD)                                                            /* when all child process reaped, pid < 0 and set error = ECHILD */
+    unix_error("waitpid error");
+
+  errno = olderrno;
+}
+
 void sigchld_handler1(int sig) 
 {
   int olderrno = errno;
@@ -381,6 +380,7 @@ void sigchld_handler1(int sig)
   sigset_t mask_all, pre_all;
 
   Sigfillset(&mask_all);
+  printf("Entering sigchld_handler\n");
   while ((pid = Waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
     
     struct job_t current_job;
@@ -406,9 +406,6 @@ void sigchld_handler1(int sig)
   return;
 }
 
-void sigchld_handler(int sig) {
-  return;
-}
 /* 
  * sigint_handler - The kernel sends a SIGINT to the shell whenver the
  *    user types ctrl-c at the keyboard.  Catch it and send it along
@@ -418,9 +415,11 @@ void sigint_handler(int sig)
 {
   int olderrno = errno;
   pid_t fg_jid = fgpid(jobs);
-  if (fg_jid != 0)
-    kill(-fg_jid, SIGINT);
+  //printf("this is fg pid: %d\n", fg_jid);
+  if (fg_jid)
+    Kill(-fg_jid, SIGINT);
   errno = olderrno;
+  return;
 }
 
 /*
@@ -705,4 +704,12 @@ void Execve(const char *filename, char *const argv[], char *const envp[])
 {
     if (execve(filename, argv, envp) < 0)
 	unix_error("Execve error");
+}
+
+void Kill(pid_t pid, int signum) 
+{
+    int rc;
+
+    if ((rc = kill(pid, signum)) < 0)
+	unix_error("Kill error");
 }
