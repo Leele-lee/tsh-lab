@@ -326,15 +326,15 @@ void do_bgfg(char **argv)
     job_ptr = getjobjid(jobs, jobid);
    
   } else {
-    pid = atoi(argv[1]);
+    pid = atoi(argv[1]);                                                      /* gey pid */
     job_ptr = getjobpid(jobs, pid);
     //Kill(pid, SIGCONT);
   }
-  if (!job_ptr) {
+  if (!job_ptr) {                                                             /* If pid or jid correspond job doesn't exist */
     printf("(%s): No such process\n", argv[1]);
     return;
   }
-  Kill(job_ptr->pid, SIGCONT);
+  Kill(-job_ptr->pid, SIGCONT);
   job_ptr->state = (!strcmp(argv[0], "fg")) ? FG : BG;                         /* change state */
   if (!strcmp(argv[0], "bg"))
     printf("[%d] (%d) Running %s", job_ptr->jid, job_ptr->pid, job_ptr->cmdline);
