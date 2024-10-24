@@ -193,7 +193,7 @@ void eval(char *cmdline) {
       Sigprocmask(SIG_SETMASK, &prev_all, NULL);      /* Unblock all signal before executing child process */
       
       if (execve(argv[0], argv, environ) < 0) {
-	printf("%s: command not found.\n", argv[0]);
+	printf("%s: command not found\n", argv[0]);
 	exit(0);
       }
     }
@@ -318,26 +318,31 @@ void do_bgfg(char **argv)
     return;
   }
   if ((argv[1][0] < '0' || argv[1][0] > '9') && (argv[1][0] != '%')) {        /* bg sdf, bg -563 is incorrect */
-    printf("%s: argument must be a PID or %%jobid", argv[0]);
+    printf("%s: argument must be a PID or %%jobid\n", argv[0]);
     return;
   }
   if (argv[1][0] == '%') {                                                    /* get jobid */
     jobid = atoi(argv[1] + 1);
     job_ptr = getjobjid(jobs, jobid);
+    if (!job_ptr) {
+      printf("(%s): No such job\n", argv[1]);
+      return;
+    }
    
   } else {
     pid = atoi(argv[1]);                                                      /* gey pid */
     job_ptr = getjobpid(jobs, pid);
     //Kill(pid, SIGCONT);
+    if (!job_ptr) {
+      printf("(%s): No such process\n", argv[1]);
+      return;
+    }
   }
-  if (!job_ptr) {                                                             /* If pid or jid correspond job doesn't exist */
-    printf("(%s): No such process\n", argv[1]);
-    return;
-  }
+  
   Kill(-job_ptr->pid, SIGCONT);
   job_ptr->state = (!strcmp(argv[0], "fg")) ? FG : BG;                         /* change state */
   if (!strcmp(argv[0], "bg"))
-    printf("[%d] (%d) Running %s", job_ptr->jid, job_ptr->pid, job_ptr->cmdline);
+    printf("[%d] (%d) %s", job_ptr->jid, job_ptr->pid, job_ptr->cmdline);
   else
     waitfg(job_ptr->pid);                                                     /* if fg must wait for terminate or stopped */
   return;
