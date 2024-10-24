@@ -382,13 +382,13 @@ void sigchld_handler(int sig) {
   //printf("Entering sigchld_handler\n");
   while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
     job = getjobpid(jobs, pid);
-    if (WIFEXITED(status)) {                                                                 /* Child process normally exited */
+    if (WIFEXITED(status)) {                                                                    /* Child process normally exited */
       Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
       deletejob(jobs, pid);
       Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
     }
-    if (WIFSIGNALED(status)) {                                                               /* Child process because of siganl */
-      printf("Job [%d] (%d) terminated by siganl %d\n", job->jid, job->pid, WTERMSIG(status));
+    if (WIFSIGNALED(status)) {                                                                  /* Child process because of siganl */
+      printf("Job [%d] (%d) terminated by siganl %d\n", job->jid, job->pid, WTERMSIG(status));  /* technically printf is not safe in signal handler */
       Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
       deletejob(jobs, pid);
       Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
@@ -396,17 +396,17 @@ void sigchld_handler(int sig) {
     if (WIFSTOPPED(status)) {
       printf("Job [%d] (%d) stopped by siganl %d\n", job->jid, job->pid, WSTOPSIG(status));
       Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
-      job->state = ST;                                                                       /* Need using atomitic operations protect global variables */
+      job->state = ST;                                                                          /* Need using atomitic operations protect global variables */
       Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
     }
-    if (WIFCONTINUED(status) && (job->state == ST)) {                                       /* may can be delete? */
+    if (WIFCONTINUED(status) && (job->state == ST)) {                                           /* may can be delete? */
       Sigprocmask(SIG_SETMASK, &mask_all, &mask_prev);
       job->state = BG;
       Sigprocmask(SIG_SETMASK, &mask_prev, NULL);
     }
   }
 
-  if (pid < 0 && errno != ECHILD)                                                            /* when all child process reaped, pid < 0 and set error = ECHILD */
+  if (pid < 0 && errno != ECHILD)                                                               /* when all child process reaped, pid < 0 and set error = ECHILD */
     unix_error("waitpid error");
 
   errno = olderrno;
