@@ -197,13 +197,16 @@ void eval(char *cmdline) {
 	exit(0);
       }
     }
-    addjob(jobs, pid, bg ? BG : FG, cmdline);
-    Sigprocmask(SIG_SETMASK, &prev_all, NULL);        /* Unblock signal */
+    //addjob(jobs, pid, bg ? BG : FG, cmdline);
+    //Sigprocmask(SIG_SETMASK, &prev_all, NULL);        /* Unblock signal */
     
     if (!bg) {
       //Waitpid(pid, &status, 0);                     /* Wrong, waitpid only wait for job terminate(after sigint_handler), not wait for reaped by sifchld_handler */
+      addjob(jobs, pid, FG, cmdline);
       waitfg(pid);                                    /*  it waits for the foreground job to finish before continuing execution */
     } else {
+      addjob(jobs, pid, BG, cmdline);
+      Sigprocmask(SIG_SETMASK, &prev_all, NULL);      /* unblock signals after addjob */
       printf("[%d] (%d) %s", ++bg_count, pid, cmdline);
     }
   }
@@ -354,9 +357,10 @@ void do_bgfg(char **argv)
 void waitfg(pid_t pid) {
   sigset_t mask;
   sigemptyset(&mask);
-  while (pid == fgpid(jobs)) {
-    sigsuspend(&mask);                /* atomic operation p781, and unblock signals */
-  }
+  while (pid == fgpid(jobs)) {           /* this time block all signal to avoid race between while and sigsuspend */
+    sigsuspend(&mask);                   /* atomic operation p781, first unblock signals and pause and block again */
+  }    
+  Sigprocmask(SIG_SETMASK, &mask, NULL); /* unblock again */
   return;
 }
 
